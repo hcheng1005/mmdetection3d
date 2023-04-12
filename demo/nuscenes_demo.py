@@ -42,6 +42,8 @@ def main(args):
     points = data['inputs']['points']
     data_input = dict(points=points)
 
+    print(result.keys)
+
     # show the results
     visualizer.add_datasample(
         'result',
