@@ -9,6 +9,12 @@ from mmdet3d.registry import VISUALIZERS
 from nuscenes.nuscenes import NuScenes
 
 import cv2
+import open3d as o3d
+import numpy as np
+from visual_utils import open3d_vis_utils as V
+
+# img_pos_list = ['CAM_BACK', 'CAM_BACK_LEFT', 'CAM_BACK_RIGHT', 'CAM_FRONT', 'CAM_FRONT_LEFT', 'CAM_FRONT_RIGHT' ]
+img_pos_list = ['CAM_BACK', 'CAM_FRONT']
 
 def parse_args():
     parser = ArgumentParser()
@@ -39,8 +45,10 @@ def main(args):
     YOLO_model = YOLO("checkpoints/YOLO/yolov8n.pt")
 
     # init visualizer
-    visualizer = VISUALIZERS.build(model.cfg.visualizer)
-    visualizer.dataset_meta = model.dataset_meta
+    vis = o3d.visualization.Visualizer()
+    vis.create_window()
+    vis.get_render_option().point_size = 1.0
+    vis.get_render_option().background_color = np.zeros(3)
 
     # 加载nuscenes数据
     nusc = NuScenes(version=args.nus_type,
@@ -55,67 +63,55 @@ def main(args):
 
         # 连续读取该scenes下的所有frame
         while cur_sample_info['next'] != "":
-            # test_sersor = 'LIDAR_TOP'
-            # sensor_data_token = nusc.get('sample_data', cur_sample_info['data'][test_sersor])
-            # data_path, box_list, cam_intrinsic = nusc.get_sample_data(sensor_data_token['token'])
-            # point = np.fromfile(data_path, dtype=np.float32,count=-1).reshape([-1, 5])
             
             pc_path_ = nusc.get_sample_data_path(cur_sample_info['data']['LIDAR_TOP'])
-            img_path_ = nusc.get_sample_data_path(cur_sample_info['data']['CAM_FRONT'])
             
             # 点云模型推理
             result, data = inference_detector(model, pc_path_)
             points = data['inputs']['points']
             data_input = dict(points=points)
             
-            # 视觉模型推理
-            results = YOLO_model(img_path_)  # predict on an image
-            img = cv2.imread(img_path_)
-
-            # 绘制检测bbox
-            box = results[0].boxes.boxes.cpu().numpy()
-            box_cls = results[0].boxes.cls.cpu().numpy()
-            for box_idx in range(box.shape[0]):
-                img = cv2.rectangle(img,
-                                    (int(box[box_idx, 0]),int(box[box_idx, 1])),
-                                    (int(box[box_idx, 2]), int(box[box_idx, 3])), 
-                                    (box_cls[box_idx]*10, box_cls[box_idx]*10, 255), 2)
-
-            cv2.imshow('img', img)
-            cv2.waitKey(100)
+            pred_instances_3d = result.pred_instances_3d
+            pred_instances_3d = pred_instances_3d[
+                            pred_instances_3d.scores_3d > args.score_thr].to('cpu')
+                        
+            bboxes_3d = pred_instances_3d.bboxes_3d.tensor.cpu().numpy()
+            labels_3d = pred_instances_3d.labels_3d
+            scores_3d = pred_instances_3d.scores_3d
             
-            # show the results
-            visualizer.add_datasample(
-                'result',
-                data_input,
-                data_sample=result,
-                draw_gt=False,
-                show=args.show,
-                wait_time=0.1,
-                out_file=args.out_dir,
-                pred_score_thr=args.score_thr,
-                vis_task='lidar_det')
+            # 视觉模型推理
+            for img_pos in img_pos_list:
+                img_path_ = nusc.get_sample_data_path(cur_sample_info['data'][img_pos])
+                results = YOLO_model(img_path_)  # predict on an image
+                img = cv2.imread(img_path_)
+
+                # 绘制检测bbox
+                box = results[0].boxes.boxes.cpu().numpy()
+                box_cls = results[0].boxes.cls.cpu().numpy()
+                for box_idx in range(box.shape[0]):
+                    img = cv2.rectangle(img,
+                                        (int(box[box_idx, 0]),int(box[box_idx, 1])),
+                                        (int(box[box_idx, 2]), int(box[box_idx, 3])), 
+                                        (box_cls[box_idx]*10, box_cls[box_idx]*10, 255), 2)
+                    
+                    
+                height, width = img.shape[:2]  # 图片的高度和宽度
+                imgZoom1 = cv2.resize(img, (int(0.4*width), int(0.4*height)))
+                cv2.imshow(img_pos, imgZoom1)
+                cv2.waitKey(1)
+            
+            # 点云和检测结果可视化
+            V.draw_scenes(vis,
+                        points=data_input['points'][:, :3],
+                        ref_boxes=bboxes_3d,
+                        ref_scores=scores_3d,
+                        ref_labels=labels_3d,
+                        wait=0.02,
+                        )
             
             # 获取下一帧
             cur_sample_info = nusc.get('sample', cur_sample_info['next'])
             
-    # # test a single point cloud sample
-    # result, data = inference_detector(model, args.pcd)
-    # points = data['inputs']['points']
-    # data_input = dict(points=points)
-
-    # # show the results
-    # visualizer.add_datasample(
-    #     'result',
-    #     data_input,
-    #     data_sample=result,
-    #     draw_gt=False,
-    #     show=args.show,
-    #     wait_time=0,
-    #     out_file=args.out_dir,
-    #     pred_score_thr=args.score_thr,
-    #     vis_task='lidar_det')
-
 
 if __name__ == '__main__':
     args = parse_args()

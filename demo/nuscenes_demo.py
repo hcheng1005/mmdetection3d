@@ -8,7 +8,6 @@ import open3d as o3d
 import numpy as np
 from visual_utils import open3d_vis_utils as V
 
-
 def parse_args():
     parser = ArgumentParser()
     parser.add_argument('pcd', help='Point cloud file')
@@ -51,10 +50,13 @@ def main(args):
     points = data['inputs']['points']
     data_input = dict(points=points)
 
-    bboxes_3d = result.pred_instances_3d.bboxes_3d
-    labels_3d = result.pred_instances_3d.labels_3d
-    scores_3d = result.pred_instances_3d.scores_3d
-
+    pred_instances_3d = result.pred_instances_3d
+    pred_instances_3d = pred_instances_3d[
+                    pred_instances_3d.scores_3d > args.score_thr].to('cpu')
+                
+    bboxes_3d = pred_instances_3d.bboxes_3d.tensor.cpu().numpy()
+    labels_3d = pred_instances_3d.labels_3d
+    scores_3d = pred_instances_3d.scores_3d
 
     V.draw_scenes(vis,
                 points=data_input['points'][:, :3],
@@ -63,17 +65,6 @@ def main(args):
                 ref_labels=labels_3d
                 )
 
-    # # show the results
-    # visualizer.add_datasample(
-    #     'result',
-    #     data_input,
-    #     data_sample=result,
-    #     draw_gt=False,
-    #     show=args.show,
-    #     wait_time=0,
-    #     out_file=args.out_dir,
-    #     pred_score_thr=args.score_thr,
-    #     vis_task='lidar_det')
 
 
 if __name__ == '__main__':
