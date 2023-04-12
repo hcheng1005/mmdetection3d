@@ -4,6 +4,10 @@ from argparse import ArgumentParser
 from mmdet3d.apis import inference_detector, init_model
 from mmdet3d.registry import VISUALIZERS
 
+import open3d as o3d
+import numpy as np
+from visual_utils import open3d_vis_utils as V
+
 
 def parse_args():
     parser = ArgumentParser()
@@ -33,28 +37,43 @@ def main(args):
     # build the model from a config file and a checkpoint file
     model = init_model(args.config, args.checkpoint, device=args.device)
 
-    # init visualizer
-    visualizer = VISUALIZERS.build(model.cfg.visualizer)
-    visualizer.dataset_meta = model.dataset_meta
+    # # init visualizer
+    # visualizer = VISUALIZERS.build(model.cfg.visualizer)
+    # visualizer.dataset_meta = model.dataset_meta
+    
+    vis = o3d.visualization.Visualizer()
+    vis.create_window()
+    vis.get_render_option().point_size = 1.0
+    vis.get_render_option().background_color = np.zeros(3)
 
     # test a single point cloud sample
     result, data = inference_detector(model, args.pcd)
     points = data['inputs']['points']
     data_input = dict(points=points)
 
-    print(result.keys)
+    bboxes_3d = result.pred_instances_3d.bboxes_3d
+    labels_3d = result.pred_instances_3d.labels_3d
+    scores_3d = result.pred_instances_3d.scores_3d
 
-    # show the results
-    visualizer.add_datasample(
-        'result',
-        data_input,
-        data_sample=result,
-        draw_gt=False,
-        show=args.show,
-        wait_time=0,
-        out_file=args.out_dir,
-        pred_score_thr=args.score_thr,
-        vis_task='lidar_det')
+
+    V.draw_scenes(vis,
+                points=data_input['points'][:, :3],
+                ref_boxes=bboxes_3d,
+                ref_scores=scores_3d,
+                ref_labels=labels_3d
+                )
+
+    # # show the results
+    # visualizer.add_datasample(
+    #     'result',
+    #     data_input,
+    #     data_sample=result,
+    #     draw_gt=False,
+    #     show=args.show,
+    #     wait_time=0,
+    #     out_file=args.out_dir,
+    #     pred_score_thr=args.score_thr,
+    #     vis_task='lidar_det')
 
 
 if __name__ == '__main__':
