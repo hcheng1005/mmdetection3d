@@ -9,15 +9,23 @@ import matplotlib
 import numpy as np
 import time
 
-box_colormap = [
-    np.array([140, 140, 136]) / 256,
-    np.array([4, 157, 217]) / 256,
-    np.array([191, 4, 54]) / 256,
-    np.array([0, 0, 0]) / 256,
-    np.array([224, 133, 250]) / 256,
-    np.array([32, 64, 40]) / 256,
-    np.array([77, 115, 67]) / 256
-]
+
+# 定义直通滤波函数
+def radar_filter(point_stack):
+    x = point_stack[:, 0]
+    y = point_stack[:, 1]
+    
+    field1 = x > -20
+    field2 = x < 20
+    field = np.logical_and(field1, field2)
+    field1 = y > -50
+    field = np.logical_and(field, field1)
+    field1 = y < 50
+    field = np.logical_and(field, field1)
+    point_stack = point_stack[field, :]
+    # print(point_stack.shape)
+    return point_stack
+    
 
 
 def get_coor_colors(obj_labels):
@@ -40,7 +48,7 @@ def get_coor_colors(obj_labels):
     return label_rgba
 
 
-def draw_scenes(vis, points, gt_boxes=None, ref_boxes=None, ref_labels=None, ref_scores=None, point_colors=None, draw_origin=True, wait=None):
+def draw_scenes(vis, points, points_radar=None, gt_boxes=None, ref_boxes=None, ref_labels=None, ref_scores=None, point_colors=None, draw_origin=True, wait=None):
     if isinstance(points, torch.Tensor):
         points = points.cpu().numpy()
     if isinstance(gt_boxes, torch.Tensor):
@@ -70,6 +78,15 @@ def draw_scenes(vis, points, gt_boxes=None, ref_boxes=None, ref_labels=None, ref
     if ref_boxes is not None:
         vis = draw_box(vis, ref_boxes, (0, 1, 0), ref_labels, ref_scores)
 
+    if points_radar is not None:
+        pts2 = open3d.geometry.PointCloud()
+        pts2.points = open3d.utility.Vector3dVector(points_radar[:, :3])
+        
+        vis.add_geometry(pts2)
+        color_ = np.ones((points_radar.shape[0], 3))
+        color_[:, 1:3] = 0.5  # RBG
+        pts2.colors = open3d.utility.Vector3dVector(color_)
+        
     if wait is not None:
         vis.poll_events()
         vis.update_renderer()
@@ -110,16 +127,24 @@ def translate_boxes_to_open3d_instance(gt_boxes):
 def draw_box(vis, gt_boxes, color=(0, 1, 0), ref_labels=None, score=None):
     for i in range(gt_boxes.shape[0]):
         line_set, box3d = translate_boxes_to_open3d_instance(gt_boxes[i])
-        if ref_labels is None:
-            line_set.paint_uniform_color(color)
-        else:
-            line_set.paint_uniform_color(box_colormap[1])
 
-        line_set.paint_uniform_color(color)
+        if ref_labels[i] <= 1: # CAR and TRUCK
+            line_set.paint_uniform_color((0, 1, 0))
+        else:
+            line_set.paint_uniform_color((0, 0, 1))
 
         vis.add_geometry(line_set)
-
-        # if score is not None:
-        #     corners = box3d.get_box_points()
-        #     vis.add_3d_label(corners[5], '%.2f' % score[i])
     return vis
+
+
+def draw_radar_scenes(vis, points):
+    pts = open3d.geometry.PointCloud()
+    pts.points = open3d.utility.Vector3dVector(points[:, :3])
+    
+    vis.add_geometry(pts)
+    color_ = np.ones((points.shape[0], 3))
+    color_[:, 1:3] = 0.5  # RBG
+    pts.colors = open3d.utility.Vector3dVector(color_)
+    render_option = vis.get_render_option()	#设置点云渲染参数
+    render_option.point_size = 2.0	#设置渲染点的大小
+    # vis.run()
