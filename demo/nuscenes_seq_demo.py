@@ -13,8 +13,16 @@ import open3d as o3d
 import numpy as np
 from visual_utils import open3d_vis_utils as V
 
+import matplotlib.pyplot as plt
+
+from nuscenes_tools import radar_tool
+
 # img_pos_list = ['CAM_BACK', 'CAM_BACK_LEFT', 'CAM_BACK_RIGHT', 'CAM_FRONT', 'CAM_FRONT_LEFT', 'CAM_FRONT_RIGHT' ]
+radar_list = ['RADAR_FRONT','RADAR_FRONT_LEFT','RADAR_FRONT_RIGHT','RADAR_BACK_LEFT','RADAR_BACK_RIGHT']
 img_pos_list = ['CAM_BACK', 'CAM_FRONT']
+
+plt.figure()
+_, radar_ax = plt.subplots(1, 1, figsize=(9, 9))
 
 def parse_args():
     parser = ArgumentParser()
@@ -108,6 +116,11 @@ def main(args):
                         ref_labels=labels_3d,
                         wait=0.02,
                         )
+            
+    
+            # 毫米波雷达点云显示
+            for sub_ in radar_list:
+                pc, velocities = radar_tool.get_radar_point(nusc, cur_sample_info['data'][sub_], ax=radar_ax)
             
             # 获取下一帧
             cur_sample_info = nusc.get('sample', cur_sample_info['next'])
