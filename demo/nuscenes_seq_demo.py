@@ -13,6 +13,14 @@ import open3d as o3d
 import numpy as np
 from visual_utils import open3d_vis_utils as V
 
+import rospy
+import os
+import numpy as np
+
+from sensor_msgs.msg import PointCloud2
+import sensor_msgs.point_cloud2 as pcl2
+from std_msgs.msg import Header
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 # mpl.use('TkAgg')
@@ -24,6 +32,10 @@ radar_list = ['RADAR_FRONT', 'RADAR_FRONT_LEFT',
     'RADAR_FRONT_RIGHT', 'RADAR_BACK_LEFT', 'RADAR_BACK_RIGHT']
 img_pos_list = ['CAM_BACK', 'CAM_FRONT']
 
+rospy.init_node('kitti_node',anonymous=True)
+pcl_pub=rospy.Publisher('kitti_pcl',PointCloud2,queue_size=10)
+rate=rospy.Rate(10)
+frame=0
 
 def parse_args():
     parser = ArgumentParser()
@@ -82,6 +94,14 @@ def main(args):
             result, data = inference_detector(model, pc_path_)
             points = data['inputs']['points']
             data_input = dict(points=points)
+
+            header=Header()
+            header.stamp=rospy.Time.now()
+            header.frame_id='map'
+
+            pcl_pub.publish(pcl2.create_cloud_xyz32(header,points[:,:3]))
+
+            rospy.loginfo('published')
 
             pred_instances_3d = result.pred_instances_3d
             pred_instances_3d = pred_instances_3d[
