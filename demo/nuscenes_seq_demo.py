@@ -17,12 +17,23 @@ import numpy as np
 from visual_utils import open3d_vis_utils as V
 
 import os
-import numpy as np
 import math
+import yaml
+import time
+
+
+# ByteTracker
+from tracker import byte_tracker as ByteTracker
+
+# 3DMOT module
+from mot_3d.mot import MOTModel
+from mot_3d.frame_data import FrameData
+from mot_3d.data_protos import BBox, Validity
 
 # ROS 
 import rospy
-from sensor_msgs.msg import PointCloud2, Image 
+from sensor_msgs.msg import PointCloud, PointCloud2, Image
+from visualization_msgs.msg import Marker, MarkerArray
 from jsk_recognition_msgs.msg import BoundingBoxArray, BoundingBox
 from cv_bridge import CvBridge
 import sensor_msgs.point_cloud2 as pcl2
@@ -42,15 +53,27 @@ python demo/nuscenes_seq_demo.py \
 USING_ROS_RVIZ = True
 
 radar_list = ['RADAR_FRONT', 'RADAR_FRONT_LEFT','RADAR_FRONT_RIGHT', 'RADAR_BACK_LEFT', 'RADAR_BACK_RIGHT']
-img_pos_list = ['CAM_FRONT']
+img_pos_list = ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT']
 
-rospy.init_node('nuScenes', anonymous=True)
-pcl_pub=rospy.Publisher('/LIDAR_TOP',PointCloud2, queue_size=1)
-img_pub=rospy.Publisher('/CAM_FRONT', Image, queue_size=1)
-pub_boxes = rospy.Publisher("/bounding_boxes", BoundingBoxArray, queue_size=1)
+
+header=Header()
+header.frame_id='nuscenes'
+rospy.init_node('nuscenes', anonymous=True)
+pcl_pub=rospy.Publisher('/LIDAR_TOP', PointCloud2, queue_size=1)
+radar_pub=rospy.Publisher('/RADAR', PointCloud2, queue_size=1)
+img_pub=rospy.Publisher('/CAMERA', Image, queue_size=1)
+pub_boxes = rospy.Publisher("/BBOX", BoundingBoxArray, queue_size=1)
+pub_trace_boxes = rospy.Publisher("/PC_TRACE", BoundingBoxArray, queue_size=1)
+pub_trace_markers = rospy.Publisher("/PC_TRACE_MARK", MarkerArray, queue_size=1)
 cv_bridge = CvBridge()
-rate=rospy.Rate(10)
-frame=0
+# rate=rospy.Rate(10)
+
+
+# 跟踪器初始化
+# load model configs
+config_path = './demo/mot_3d/config/giou.yaml'
+configs = yaml.load(open(config_path, 'r'), Loader=yaml.Loader)
+pc_tracker = MOTModel(configs)
 
 '''
 names: 
@@ -104,34 +127,85 @@ description: Briefly describe the function of your function
 param {*} bboxes_3d
 return {*}
 '''
-def publish_boundingBox(bboxes_3d):
-    bboxes = BoundingBoxArray()
-    bboxes.boxes = []
-    bboxes.header.frame_id = 'map'
-    for i in range(bboxes_3d.shape[0]):
-        box = BoundingBox()
-        center = bboxes_3d[i, 0:3]
-        lwh = bboxes_3d[i, 3:6]
-        # axis_angles = np.array([0, 0, bboxes_3d[i, 6] + 1e-10])
-        axis_angles = np.array([bboxes_3d[i, 6] + 1e-10, 0, 0])
-        q = RPY2Quar(axis_angles)
-        box.header.frame_id = 'map'
-        box.pose = q
-        box.pose.position.x = float(center[0])
-        box.pose.position.y = float(center[1])
-        box.pose.position.z = float(center[2])
-        # box.pose.orientation.w = q.w
-        # box.pose.orientation.x = q.x
-        # box.pose.orientation.y = q.y
-        # box.pose.orientation.z = q.z
-        box.dimensions.x = float(lwh[0])
-        box.dimensions.y = float(lwh[1])
-        box.dimensions.z = float(lwh[2])
-        box.label = 1
-        box.value = 0
-        bboxes.boxes.append(box)
-    return bboxes
+def publish_boundingBox(bboxes, type='detection', ids=None, label=None):
+    ros_bboxes = BoundingBoxArray()
+    ros_bboxes.boxes = []
+    ros_bboxes.header.frame_id = 'nuscenes'
+    
+    marker_array = MarkerArray()
+    marker_array.markers = []
+    if type == 'detection':
+        for i in range(bboxes.shape[0]):
+            box = BoundingBox()
+            center = bboxes[i, 0:3]
+            lwh = bboxes[i, 4:7]
+            # axis_angles = np.array([0, 0, bboxes[i, 6] + 1e-10])
+            axis_angles = np.array([bboxes[i, 3] + 1e-10, 0, 0])
+            q = RPY2Quar(axis_angles)
+            box.header.frame_id = 'nuscenes'
+            box.pose = q
+            box.pose.position.x = float(center[0])
+            box.pose.position.y = float(center[1])
+            box.pose.position.z = float(center[2])
+            box.dimensions.x = float(lwh[0])
+            box.dimensions.y = float(lwh[1])
+            box.dimensions.z = float(lwh[2])
+            box.label = 1
+            box.value = 0
+            ros_bboxes.boxes.append(box)
 
+    else:
+        bboxes_3d = [BBox.bbox2array(bbox) for bbox in bboxes]
+        bboxes_3d = np.array(bboxes_3d)
+        for i in range(bboxes_3d.shape[0]):
+            box = BoundingBox()
+            center = bboxes_3d[i, 0:3]
+            lwh = bboxes_3d[i, 4:7]
+            # axis_angles = np.array([0, 0, bboxes_3d[i, 6] + 1e-10])
+            axis_angles = np.array([bboxes_3d[i, 3] + 1e-10, 0, 0])
+            q = RPY2Quar(axis_angles)
+            box.header.frame_id = 'nuscenes'
+            box.pose = q
+            box.pose.position.x = (center[0])
+            box.pose.position.y = (center[1])
+            box.pose.position.z = (center[2])
+            # box.pose.orientation.w = q.w
+            # box.pose.orientation.x = q.x
+            # box.pose.orientation.y = q.y
+            # box.pose.orientation.z = q.z
+            box.dimensions.x = (lwh[0])
+            box.dimensions.y = (lwh[1])
+            box.dimensions.z = (lwh[2])
+            box.label = 1
+            box.value = 0
+            ros_bboxes.boxes.append(box)
+
+            sub_mark = Marker()
+            # sub_mark.header.stamp = rospy.Time.now()
+            sub_mark.header.frame_id = 'nuscenes'
+            sub_mark.id = i
+            sub_mark.text = str(label[i]) + '_' + str(ids[i]) + '__' + str(i)
+            sub_mark.action = Marker.ADD
+            sub_mark.type = Marker.TEXT_VIEW_FACING
+            # sub_mark.lifetime = rospy.Duration(0)
+            
+            sub_mark.pose.position.x = (center[0])
+            sub_mark.pose.position.y = (center[1])
+            sub_mark.pose.position.z = (center[2]) + 0.5
+            
+            sub_mark.color.a = 1
+            sub_mark.color.r = 1
+            sub_mark.color.g = 0
+            sub_mark.color.b = 0
+
+            sub_mark.scale.x = 1
+            sub_mark.scale.y = 1
+            sub_mark.scale.z = 1
+            
+            marker_array.markers.append(sub_mark)
+            
+        
+    return ros_bboxes, marker_array
 '''
 names: 
 description: Briefly describe the function of your function
@@ -167,8 +241,7 @@ def main(args):
         # 连续读取该scenes下的所有frame
         while cur_sample_info['next'] != "":
 
-            pc_path_ = nusc.get_sample_data_path(
-                cur_sample_info['data']['LIDAR_TOP'])
+            pc_path_ = nusc.get_sample_data_path(cur_sample_info['data']['LIDAR_TOP'])
 
             # 点云模型推理
             result, data = inference_detector(model, pc_path_)
@@ -182,11 +255,33 @@ def main(args):
             bboxes_3d = pred_instances_3d.bboxes_3d.tensor.cpu().numpy()
             labels_3d = pred_instances_3d.labels_3d
             scores_3d = pred_instances_3d.scores_3d
+            
+            # 构造MOT输入
+            aux_info = {'is_key_frame': True}
+            millis = int(round(time.time() * 1000))
+            bboxes_3d[:, [3,4,5,6]] = bboxes_3d[:, [6,3,4,5]] 
+            new_dets=list()
+            for idx, det in enumerate(bboxes_3d):
+                if labels_3d[idx] < 2:
+                    new_dets.append(det)
+            frame_data = FrameData(dets=new_dets, ego=None, time_stamp=millis, pc=points, det_types=None, aux_info=aux_info)
+
+            #执行MOT算法
+            results = pc_tracker.frame_mot(frame_data)
+            # print(results)
+            result_pred_bboxes = [trk[0] for trk in results]
+            result_pred_ids = [trk[1] for trk in results]
+            result_pred_states = [trk[2] for trk in results]
+            result_types = [trk[3] for trk in results]
+            
+            result_pred_bbox, markers = publish_boundingBox(result_pred_bboxes,'track', result_pred_ids, result_types)
+            pub_trace_boxes.publish(result_pred_bbox)
+            pub_trace_markers.publish(markers)
 
             # 视觉模型推理
+            img_list = []
             for img_pos in img_pos_list:
-                img_path_ = nusc.get_sample_data_path(
-                    cur_sample_info['data'][img_pos])
+                img_path_ = nusc.get_sample_data_path(cur_sample_info['data'][img_pos])
                 results = YOLO_model(img_path_)  # predict on an image
                 img = cv2.imread(img_path_)
 
@@ -207,9 +302,14 @@ def main(args):
                     cv2.imshow(img_pos, imgZoom1)
                     cv2.waitKey(1)
                 else:
-                    img_msg = cv_bridge.cv2_to_imgmsg(img, "bgr8")
-                    img_pub.publish(img_msg)
-
+                    img_list.append(img)
+                
+            img_FRONT = np.hstack((np.hstack((img_list[0], img_list[1])), img_list[2]))
+            img_BACK = np.hstack((np.hstack((img_list[3], img_list[4])), img_list[5]))  
+            img_ALL = np.vstack((img_FRONT, img_BACK))
+            img_msg = cv_bridge.cv2_to_imgmsg(img_ALL, "bgr8")
+            img_pub.publish(img_msg)
+                
             # 毫米波雷达点云显示
             for sub_ in radar_list:
                 pc, velocities = radar_tool.get_radar_point(
@@ -228,21 +328,20 @@ def main(args):
                             ref_boxes=bboxes_3d,
                             ref_scores=scores_3d,
                             ref_labels=labels_3d,
-                            wait=0.02,
-                            )     
+                            wait=0.02)     
             else:
-                header=Header()
+                
                 header.stamp=rospy.Time.now()
-                header.frame_id='map'
-                pcl_pub.publish(pcl2.create_cloud_xyz32(header,points[:,:3]))
+                pcl_pub.publish(pcl2.create_cloud_xyz32(header, points[:,:3]))
+                radar_pub.publish(pcl2.create_cloud_xyz32(header, all_point[:3, :].T))
                 rospy.loginfo('published')
                 
-                bboxes = publish_boundingBox(bboxes_3d)
+                bboxes, not_uesd = publish_boundingBox(bboxes_3d)
                 pub_boxes.publish(bboxes)
                 
             # 获取下一帧
             cur_sample_info = nusc.get('sample', cur_sample_info['next'])
-            
+             
 
 if __name__ == '__main__':
     args = parse_args()
