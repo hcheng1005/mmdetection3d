@@ -20,7 +20,8 @@ import os
 import math
 import yaml
 import time
-
+import sys
+import signal
 
 # ByteTracker
 from tracker import byte_tracker as ByteTracker
@@ -80,6 +81,12 @@ names:
 description: Briefly describe the function of your function
 return {*}
 '''
+def quit(signum, frame):
+    sys.exit()
+    
+signal.signal(signal.SIGINT, quit)
+signal.signal(signal.SIGTERM, quit)
+
 def parse_args():
     parser = ArgumentParser()
     parser.add_argument('nus_type', type=str, help='Point cloud file')
@@ -232,6 +239,9 @@ def main(args):
     plt.figure()
     fig, ax = plt.subplots(1, 1, figsize=(9, 9))
 
+    signal.signal(signal.SIGINT, quit)
+    signal.signal(signal.SIGTERM, quit)
+
     for scene_idx in range(len(nusc.scene)):
         scene = nusc.scene[scene_idx]
 
@@ -341,8 +351,15 @@ def main(args):
                 
             # 获取下一帧
             cur_sample_info = nusc.get('sample', cur_sample_info['next'])
+            
+            if cv2.waitKey(10) == 'q':
+                return 
+            else:
+                print('sitll ongoing!!!!!!!!!!!!!!!!')
              
 
 if __name__ == '__main__':
     args = parse_args()
     main(args)
+    rospy.signal_shutdown("closed!")
+    rospy.spin()
