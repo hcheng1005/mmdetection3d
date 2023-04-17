@@ -10,6 +10,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 from nuscenes.nuscenes import NuScenes
+import torch
 
 import cv2
 import open3d as o3d
@@ -50,6 +51,8 @@ python demo/nuscenes_seq_demo.py \
     configs/pointpillars/pointpillars_hv_secfpn_sbn-all_8xb4-2x_nus-3d.py \
     checkpoints/nuscenes/hv_pointpillars_secfpn_sbn-all_4x8_2x_nus-3d_20210826_225857-f19d00a3.pth --show --score-thr=0.6
 '''
+
+device = torch.device("cuda")
 
 USING_ROS_RVIZ = True
 
@@ -224,6 +227,7 @@ def main(args):
 
     # 加载视觉模型
     YOLO_model = YOLO("checkpoints/YOLO/yolov8n.pt")
+    YOLO_model.to(args.device)
 
     # init visualizer
     if USING_ROS_RVIZ is not True:
