@@ -60,6 +60,11 @@ radar_list = ['RADAR_FRONT', 'RADAR_FRONT_LEFT','RADAR_FRONT_RIGHT', 'RADAR_BACK
 img_pos_list = ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT']
 
 
+# config
+RUN_3DMOT = False
+RUN_CAMERA_DET = False
+
+
 header=Header()
 header.frame_id='nuscenes'
 rospy.init_node('nuscenes', anonymous=True)
@@ -224,10 +229,11 @@ return {*}
 '''
 def main(args):
     model = init_model(args.config, args.checkpoint, device=args.device)
+    model.to('cuda:0')
 
     # 加载视觉模型
     YOLO_model = YOLO("checkpoints/YOLO/yolov8n.pt")
-    YOLO_model.to(args.device)
+    YOLO_model.to('cuda:0')
 
     # init visualizer
     if USING_ROS_RVIZ is not True:
@@ -258,9 +264,11 @@ def main(args):
             pc_path_ = nusc.get_sample_data_path(cur_sample_info['data']['LIDAR_TOP'])
 
             # 点云模型推理
+            print(time.time_ns() / 1e6)
             result, data = inference_detector(model, pc_path_)
             points = data['inputs']['points']
             data_input = dict(points=points)
+            print(time.time_ns() / 1e6)
 
             pred_instances_3d = result.pred_instances_3d
             pred_instances_3d = pred_instances_3d[
@@ -270,45 +278,50 @@ def main(args):
             labels_3d = pred_instances_3d.labels_3d
             scores_3d = pred_instances_3d.scores_3d
             
-            # 构造MOT输入
-            aux_info = {'is_key_frame': True}
-            millis = int(round(time.time() * 1000))
-            bboxes_3d[:, [3,4,5,6]] = bboxes_3d[:, [6,3,4,5]] 
-            new_dets=list()
-            for idx, det in enumerate(bboxes_3d):
-                if labels_3d[idx] < 2:
-                    new_dets.append(det)
-            frame_data = FrameData(dets=new_dets, ego=None, time_stamp=millis, pc=points, det_types=None, aux_info=aux_info)
 
             #执行MOT算法
-            results = pc_tracker.frame_mot(frame_data)
-            # print(results)
-            result_pred_bboxes = [trk[0] for trk in results]
-            result_pred_ids = [trk[1] for trk in results]
-            result_pred_states = [trk[2] for trk in results]
-            result_types = [trk[3] for trk in results]
-            
-            result_pred_bbox, markers = publish_boundingBox(result_pred_bboxes,'track', result_pred_ids, result_types)
-            pub_trace_boxes.publish(result_pred_bbox)
-            pub_trace_markers.publish(markers)
+            if RUN_3DMOT:
+                # 构造MOT输入
+                aux_info = {'is_key_frame': True}
+                millis = int(round(time.time() * 1000))
+                bboxes_3d[:, [3,4,5,6]] = bboxes_3d[:, [6,3,4,5]] 
+                new_dets=list()
+                for idx, det in enumerate(bboxes_3d):
+                    if labels_3d[idx] < 2:
+                        new_dets.append(det)
+                frame_data = FrameData(dets=new_dets, ego=None, time_stamp=millis, pc=points, det_types=None, aux_info=aux_info)
+                
+                # 跟踪算法入口
+                results = pc_tracker.frame_mot(frame_data)
+                
+                # print(results)
+                result_pred_bboxes = [trk[0] for trk in results]
+                result_pred_ids = [trk[1] for trk in results]
+                result_pred_states = [trk[2] for trk in results]
+                result_types = [trk[3] for trk in results]
+                
+                result_pred_bbox, markers = publish_boundingBox(result_pred_bboxes,'track', result_pred_ids, result_types)
+                pub_trace_boxes.publish(result_pred_bbox)
+                pub_trace_markers.publish(markers)
 
             # 视觉模型推理
             img_list = []
             for img_pos in img_pos_list:
                 img_path_ = nusc.get_sample_data_path(cur_sample_info['data'][img_pos])
-                results = YOLO_model(img_path_)  # predict on an image
                 img = cv2.imread(img_path_)
 
-                # 绘制检测bbox
-                box = results[0].boxes.boxes.cpu().numpy()
-                box_cls = results[0].boxes.cls.cpu().numpy()
-                for box_idx in range(box.shape[0]):
-                    img = cv2.rectangle(img,
-                                        (int(box[box_idx, 0]),
-                                         int(box[box_idx, 1])),
-                                        (int(box[box_idx, 2]),
-                                         int(box[box_idx, 3])),
-                                        (box_cls[box_idx]*10, box_cls[box_idx]*10, 255), 2)
+                if RUN_CAMERA_DET:
+                    results = YOLO_model(img_path_)  # predict on an image
+                    # 绘制检测bbox
+                    box = results[0].boxes.boxes.cpu().numpy()
+                    box_cls = results[0].boxes.cls.cpu().numpy()
+                    for box_idx in range(box.shape[0]):
+                        img = cv2.rectangle(img,
+                                            (int(box[box_idx, 0]),
+                                            int(box[box_idx, 1])),
+                                            (int(box[box_idx, 2]),
+                                            int(box[box_idx, 3])),
+                                            (box_cls[box_idx]*10, box_cls[box_idx]*10, 255), 2)
                 
                 if USING_ROS_RVIZ is not True:
                     height, width = img.shape[:2]  # 图片的高度和宽度     

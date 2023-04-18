@@ -13,7 +13,7 @@ running:
     iou: 0.9
 
 redundancy:
-  mode: default
+  mode: mm
   det_score_threshold: 
     iou: 0.01
     giou: 0.01

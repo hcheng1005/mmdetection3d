@@ -6,6 +6,11 @@ from .update_info_data import UpdateInfoData
 from .data_protos import BBox, Validity
 
 
+'''
+names: associate_dets_to_tracks
+description: 分配算法入口
+return {*}
+'''
 def associate_dets_to_tracks(dets, tracks, mode, asso, 
     dist_threshold=0.9, trk_innovation_matrix=None):
     """ associate the tracks with detections
