@@ -35,6 +35,7 @@ from mot_3d.data_protos import BBox, Validity
 # ROS 
 import rospy
 from sensor_msgs.msg import PointCloud, PointCloud2, Image
+from sensor_msgs.msg import PointField
 from visualization_msgs.msg import Marker, MarkerArray
 from jsk_recognition_msgs.msg import BoundingBoxArray, BoundingBox
 from cv_bridge import CvBridge
@@ -57,23 +58,24 @@ device = torch.device("cuda")
 USING_ROS_RVIZ = True
 
 radar_list = ['RADAR_FRONT', 'RADAR_FRONT_LEFT','RADAR_FRONT_RIGHT', 'RADAR_BACK_LEFT', 'RADAR_BACK_RIGHT']
-img_pos_list = ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT']
-
+# img_pos_list = ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT']
+img_pos_list = ['CAM_FRONT_LEFT']
 
 # config
-RUN_3DMOT = False
+RUN_3DMOT = True
 RUN_CAMERA_DET = False
+RADAR_VISIABLE = False
 
 
 header=Header()
 header.frame_id='nuscenes'
 rospy.init_node('nuscenes', anonymous=True)
-pcl_pub=rospy.Publisher('/LIDAR_TOP', PointCloud2, queue_size=1)
-radar_pub=rospy.Publisher('/RADAR', PointCloud2, queue_size=1)
-img_pub=rospy.Publisher('/CAMERA', Image, queue_size=1)
-pub_boxes = rospy.Publisher("/BBOX", BoundingBoxArray, queue_size=1)
-pub_trace_boxes = rospy.Publisher("/PC_TRACE", BoundingBoxArray, queue_size=1)
-pub_trace_markers = rospy.Publisher("/PC_TRACE_MARK", MarkerArray, queue_size=1)
+pcl_pub=rospy.Publisher('/LIDAR_TOP', PointCloud2, queue_size=10)
+radar_pub=rospy.Publisher('/RADAR', PointCloud2, queue_size=10)
+img_pub=rospy.Publisher('/CAMERA', Image, queue_size=10)
+pub_boxes = rospy.Publisher("/BBOX", BoundingBoxArray, queue_size=10)
+pub_trace_boxes = rospy.Publisher("/PC_TRACE", BoundingBoxArray, queue_size=10)
+pub_trace_markers = rospy.Publisher("/PC_TRACE_MARK", MarkerArray, queue_size=10)
 cv_bridge = CvBridge()
 # rate=rospy.Rate(10)
 
@@ -221,6 +223,26 @@ def publish_boundingBox(bboxes, type='detection', ids=None, label=None):
             
         
     return ros_bboxes, marker_array
+
+
+def publish_lidar_point(points):
+    header.stamp=rospy.Time.now()
+    msg = PointCloud2()
+    msg.header.stamp = rospy.Time().now()
+    msg.header.frame_id = "nuscenes"
+    msg.height = 1
+    msg.width = points.shape[0]
+    msg.fields = [
+    PointField('x', 0, PointField.FLOAT32, 1),
+    PointField('y', 4, PointField.FLOAT32, 1),
+    PointField('z', 8, PointField.FLOAT32, 1)]
+    msg.is_bigendian = False
+    msg.point_step = 12
+    msg.row_step = msg.point_step * points.shape[0]
+    msg.is_dense = False
+    msg.data = np.asarray(points[:,:3], np.float32).tostring()
+    pcl_pub.publish(msg)
+
 '''
 names: 
 description: Briefly describe the function of your function
@@ -264,27 +286,27 @@ def main(args):
             pc_path_ = nusc.get_sample_data_path(cur_sample_info['data']['LIDAR_TOP'])
 
             # 点云模型推理
-            print(time.time_ns() / 1e6)
             result, data = inference_detector(model, pc_path_)
             points = data['inputs']['points']
+            
+            # 发布点云
+            publish_lidar_point(points)
             data_input = dict(points=points)
-            print(time.time_ns() / 1e6)
 
             pred_instances_3d = result.pred_instances_3d
             pred_instances_3d = pred_instances_3d[
                             pred_instances_3d.scores_3d > args.score_thr].to('cpu')
 
             bboxes_3d = pred_instances_3d.bboxes_3d.tensor.cpu().numpy()
+            bboxes_3d[:, [3,4,5,6]] = bboxes_3d[:, [6,3,4,5]] 
             labels_3d = pred_instances_3d.labels_3d
             scores_3d = pred_instances_3d.scores_3d
             
-
             #执行MOT算法
             if RUN_3DMOT:
                 # 构造MOT输入
                 aux_info = {'is_key_frame': True}
                 millis = int(round(time.time() * 1000))
-                bboxes_3d[:, [3,4,5,6]] = bboxes_3d[:, [6,3,4,5]] 
                 new_dets=list()
                 for idx, det in enumerate(bboxes_3d):
                     if labels_3d[idx] < 2:
@@ -331,20 +353,21 @@ def main(args):
                 else:
                     img_list.append(img)
                 
-            img_FRONT = np.hstack((np.hstack((img_list[0], img_list[1])), img_list[2]))
-            img_BACK = np.hstack((np.hstack((img_list[3], img_list[4])), img_list[5]))  
-            img_ALL = np.vstack((img_FRONT, img_BACK))
-            img_msg = cv_bridge.cv2_to_imgmsg(img_ALL, "bgr8")
+            # img_FRONT = np.hstack((np.hstack((img_list[0], img_list[1])), img_list[2]))
+            # img_BACK = np.hstack((np.hstack((img_list[3], img_list[4])), img_list[5]))  
+            # img_ALL = np.vstack((img_FRONT, img_BACK))
+            img_msg = cv_bridge.cv2_to_imgmsg(img_list[0], "bgr8")
             img_pub.publish(img_msg)
-                
+               
             # 毫米波雷达点云显示
-            for sub_ in radar_list:
-                pc, velocities = radar_tool.get_radar_point(
-                    nusc, cur_sample_info['data'][sub_], ax=ax)
-                if sub_ == 'RADAR_FRONT':
-                    all_point = pc.points
-                else:
-                    all_point = np.hstack((all_point, pc.points))
+            if RADAR_VISIABLE:
+                for sub_ in radar_list:
+                    pc, velocities = radar_tool.get_radar_point(
+                        nusc, cur_sample_info['data'][sub_], ax=ax)
+                    if sub_ == 'RADAR_FRONT':
+                        all_point = pc.points
+                    else:
+                        all_point = np.hstack((all_point, pc.points))
                     
                     
             if USING_ROS_RVIZ is not True:
@@ -357,11 +380,9 @@ def main(args):
                             ref_labels=labels_3d,
                             wait=0.02)     
             else:
-                
-                header.stamp=rospy.Time.now()
-                pcl_pub.publish(pcl2.create_cloud_xyz32(header, points[:,:3]))
-                radar_pub.publish(pcl2.create_cloud_xyz32(header, all_point[:3, :].T))
-                rospy.loginfo('published')
+                if RADAR_VISIABLE:
+                    radar_pub.publish(pcl2.create_cloud_xyz32(header, all_point[:3, :].T))
+                # rospy.loginfo('published')
                 
                 bboxes, not_uesd = publish_boundingBox(bboxes_3d)
                 pub_boxes.publish(bboxes)
@@ -369,10 +390,7 @@ def main(args):
             # 获取下一帧
             cur_sample_info = nusc.get('sample', cur_sample_info['next'])
             
-            if cv2.waitKey(10) == 'q':
-                return 
-            else:
-                print('sitll ongoing!!!!!!!!!!!!!!!!')
+                
              
 
 if __name__ == '__main__':

@@ -19,7 +19,7 @@ from mmdet3d.structures import Box3DMode, Det3DDataSample, get_box_type
 from mmdet3d.structures.det3d_data_sample import SampleList
 
 
-import time
+# import time
 
 def convert_SyncBN(config):
     """Convert config's naiveSyncBN to BN.
@@ -166,9 +166,9 @@ def inference_detector(model: nn.Module,
 
     # forward the model
     with torch.no_grad():
-        print(time.time_ns() / 1e6)
+        # print(time.time_ns() / 1e6)
         results = model.test_step(collate_data)
-        print(time.time_ns() / 1e6)
+        # print(time.time_ns() / 1e6)
 
     if not is_batch:
         return results[0], data[0]
