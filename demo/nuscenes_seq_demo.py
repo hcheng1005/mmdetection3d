@@ -28,9 +28,9 @@ import signal
 from tracker import byte_tracker as ByteTracker
 
 # 3DMOT module
-from mot_3d.mot import MOTModel
-from mot_3d.frame_data import FrameData
-from mot_3d.data_protos import BBox, Validity
+from .mot_3d.mot import MOTModel
+from .mot_3d.frame_data import FrameData
+from .mot_3d.data_protos import BBox, Validity
 
 # ROS 
 import rospy
@@ -53,38 +53,6 @@ python demo/nuscenes_seq_demo.py \
     checkpoints/nuscenes/hv_pointpillars_secfpn_sbn-all_4x8_2x_nus-3d_20210826_225857-f19d00a3.pth --show --score-thr=0.6
 '''
 
-device = torch.device("cuda")
-
-USING_ROS_RVIZ = True
-
-radar_list = ['RADAR_FRONT', 'RADAR_FRONT_LEFT','RADAR_FRONT_RIGHT', 'RADAR_BACK_LEFT', 'RADAR_BACK_RIGHT']
-# img_pos_list = ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT']
-img_pos_list = ['CAM_FRONT_LEFT']
-
-# config
-RUN_3DMOT = True
-RUN_CAMERA_DET = False
-RADAR_VISIABLE = False
-
-
-header=Header()
-header.frame_id='nuscenes'
-rospy.init_node('nuscenes', anonymous=True)
-pcl_pub=rospy.Publisher('/LIDAR_TOP', PointCloud2, queue_size=10)
-radar_pub=rospy.Publisher('/RADAR', PointCloud2, queue_size=10)
-img_pub=rospy.Publisher('/CAMERA', Image, queue_size=10)
-pub_boxes = rospy.Publisher("/BBOX", BoundingBoxArray, queue_size=10)
-pub_trace_boxes = rospy.Publisher("/PC_TRACE", BoundingBoxArray, queue_size=10)
-pub_trace_markers = rospy.Publisher("/PC_TRACE_MARK", MarkerArray, queue_size=10)
-cv_bridge = CvBridge()
-# rate=rospy.Rate(10)
-
-
-# 跟踪器初始化
-# load model configs
-config_path = './demo/mot_3d/config/giou.yaml'
-configs = yaml.load(open(config_path, 'r'), Loader=yaml.Loader)
-pc_tracker = MOTModel(configs)
 
 '''
 names: 
@@ -221,7 +189,6 @@ def publish_boundingBox(bboxes, type='detection', ids=None, label=None):
             
             marker_array.markers.append(sub_mark)
             
-        
     return ros_bboxes, marker_array
 
 
@@ -393,6 +360,44 @@ def main(args):
                 
              
 
+device = torch.device("cuda")
+
+USING_ROS_RVIZ = True
+
+radar_list = ['RADAR_FRONT', 'RADAR_FRONT_LEFT','RADAR_FRONT_RIGHT', 'RADAR_BACK_LEFT', 'RADAR_BACK_RIGHT']
+# img_pos_list = ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT']
+img_pos_list = ['CAM_FRONT_LEFT']
+
+# config
+RUN_3DMOT = True
+RUN_CAMERA_DET = False
+RADAR_VISIABLE = False
+
+
+header=Header()
+header.frame_id='nuscenes'
+rospy.init_node('nuscenes', anonymous=True)
+pcl_pub=rospy.Publisher('/LIDAR_TOP', PointCloud2, queue_size=10)
+radar_pub=rospy.Publisher('/RADAR', PointCloud2, queue_size=10)
+img_pub=rospy.Publisher('/CAMERA', Image, queue_size=10)
+pub_boxes = rospy.Publisher("/BBOX", BoundingBoxArray, queue_size=10)
+pub_trace_boxes = rospy.Publisher("/PC_TRACE", BoundingBoxArray, queue_size=10)
+pub_trace_markers = rospy.Publisher("/PC_TRACE_MARK", MarkerArray, queue_size=10)
+cv_bridge = CvBridge()
+# rate=rospy.Rate(10)
+
+# 跟踪器初始化
+# load model configs
+config_path = './demo/mot_3d/config/iou.yaml'
+configs = yaml.load(open(config_path, 'r'), Loader=yaml.Loader)
+pc_tracker = MOTModel(configs)
+
+
+'''
+names: 
+description: Briefly describe the function of your function
+return {*}
+'''
 if __name__ == '__main__':
     args = parse_args()
     main(args)

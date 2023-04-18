@@ -17,4 +17,4 @@ class FrameData:
             self.dets[i] = BBox.array2bbox(det)
         
         if not aux_info['is_key_frame']:
-            self.dets = [d for d in self.dets if d.s >= 0.5]
+            self.dets = [d for d in self.dets if d.s >= 0.6]
