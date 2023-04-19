@@ -1,8 +1,6 @@
 """ input form of the data in each frame
 """
 from .data_protos import BBox
-import numpy as np, mot_3d.utils as utils
-
 
 class FrameData:
     def __init__(self, dets, ego, time_stamp=None, pc=None, det_types=None, aux_info=None):

@@ -1,9 +1,6 @@
-import numpy as np, mot_3d.tracklet as tracklet
+import numpy as np
 from . import utils
 from scipy.optimize import linear_sum_assignment
-from .frame_data import FrameData
-from .update_info_data import UpdateInfoData
-from .data_protos import BBox, Validity
 
 
 '''

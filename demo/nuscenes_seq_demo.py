@@ -23,6 +23,7 @@ import yaml
 import time
 import sys
 import signal
+import json
 
 # ByteTracker
 from tracker import byte_tracker as ByteTracker
@@ -290,16 +291,17 @@ def main(args):
     signal.signal(signal.SIGINT, quit)
     signal.signal(signal.SIGTERM, quit)
 
-    for scene_idx in range(len(nusc.scene)):
-        scene = nusc.scene[scene_idx]
-
-        # 获取该场景的first token
-        cur_sample_info = nusc.get('sample', scene['first_sample_token'])
-
-        # 连续读取该scenes下的所有frame
-        while cur_sample_info['next'] != "":
-
-            pc_path_ = nusc.get_sample_data_path(cur_sample_info['data']['LIDAR_TOP'])
+    dataroot='/media/charles/ShareDisk/00myDataSet/nuScenes/v1.0-test/'
+    root = './demo/result/v1.0-test/'
+    for filename in os.listdir(root):
+        print(filename)
+    
+        f = open(root + filename, 'r')
+        all_json_data = f.read()
+        de_json = json.loads(all_json_data)
+        
+        for idx in range(len(de_json)):
+            pc_path_ = dataroot + de_json[idx]['LIDAR_TOP']
 
             # 点云模型推理
             result, data = inference_detector(model, pc_path_)
@@ -322,13 +324,14 @@ def main(args):
             #执行MOT算法
             if RUN_3DMOT_FLAG:
                 run_3DMOT(pred_instances_3d.bboxes_3d.tensor.cpu().numpy() , 
-                          pred_instances_3d.scores_3d, 
-                          pred_instances_3d.labels_3d)
+                            pred_instances_3d.scores_3d, 
+                            pred_instances_3d.labels_3d)
 
             # 视觉模型推理
             img_list = []
             for img_pos in img_pos_list:
-                img_path_ = nusc.get_sample_data_path(cur_sample_info['data'][img_pos])
+                # img_path_ = nusc.get_sample_data_path(cur_sample_info['data'][img_pos])
+                img_path_ = dataroot + de_json[idx]['CAM_FRONT']
                 img = cv2.imread(img_path_)
 
                 if RUN_CAMERA_DET:
@@ -357,38 +360,10 @@ def main(args):
             # img_ALL = np.vstack((img_FRONT, img_BACK))
             img_msg = cv_bridge.cv2_to_imgmsg(img_list[0], "bgr8")
             img_pub.publish(img_msg)
-               
-            # 毫米波雷达点云显示
-            if RADAR_VISIABLE:
-                for sub_ in radar_list:
-                    pc, velocities = radar_tool.get_radar_point(
-                        nusc, cur_sample_info['data'][sub_], ax=ax)
-                    if sub_ == 'RADAR_FRONT':
-                        all_point = pc.points
-                    else:
-                        all_point = np.hstack((all_point, pc.points))
-                    
-                    
-            if USING_ROS_RVIZ is not True:
-                # 点云和检测结果可视化
-                V.draw_scenes(vis,
-                            points=data_input['points'][:, :3],
-                            points_radar=V.radar_filter(all_point[:3, :].T),
-                            ref_boxes=bboxes_3d,
-                            ref_scores=scores_3d,
-                            ref_labels=labels_3d,
-                            wait=0.02)     
-            else:
-                if RADAR_VISIABLE:
-                    radar_pub.publish(pcl2.create_cloud_xyz32(header, all_point[:3, :].T))
-                # rospy.loginfo('published')
-                
-                bboxes, not_uesd = publish_boundingBox(bboxes_3d)
-                pub_boxes.publish(bboxes)
-                
-            # 获取下一帧
-            cur_sample_info = nusc.get('sample', cur_sample_info['next'])
-            
+                            
+            bboxes, not_uesd = publish_boundingBox(bboxes_3d)
+            pub_boxes.publish(bboxes)
+                            
                 
              
 radar_list = ['RADAR_FRONT', 'RADAR_FRONT_LEFT','RADAR_FRONT_RIGHT', 'RADAR_BACK_LEFT', 'RADAR_BACK_RIGHT']
@@ -398,7 +373,7 @@ img_pos_list = ['CAM_FRONT_LEFT']
 # config
 USING_ROS_RVIZ = True
 
-RUN_3DMOT_FLAG = False
+RUN_3DMOT_FLAG = True
 RUN_CAMERA_DET = False
 RADAR_VISIABLE = False
 
