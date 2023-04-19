@@ -28,9 +28,9 @@ import signal
 from tracker import byte_tracker as ByteTracker
 
 # 3DMOT module
-from .mot_3d.mot import MOTModel
-from .mot_3d.frame_data import FrameData
-from .mot_3d.data_protos import BBox, Validity
+from mot_3d.mot import MOTModel
+from mot_3d.frame_data import FrameData
+from mot_3d.data_protos import BBox, Validity
 
 # ROS 
 import rospy
@@ -65,6 +65,11 @@ def quit(signum, frame):
 signal.signal(signal.SIGINT, quit)
 signal.signal(signal.SIGTERM, quit)
 
+'''
+names: 
+description: Briefly describe the function of your function
+return {*}
+'''
 def parse_args():
     parser = ArgumentParser()
     parser.add_argument('nus_type', type=str, help='Point cloud file')
@@ -192,6 +197,12 @@ def publish_boundingBox(bboxes, type='detection', ids=None, label=None):
     return ros_bboxes, marker_array
 
 
+'''
+names: 
+description: Briefly describe the function of your function
+param {*} points
+return {*}
+'''
 def publish_lidar_point(points):
     header.stamp=rospy.Time.now()
     msg = PointCloud2()
@@ -209,6 +220,43 @@ def publish_lidar_point(points):
     msg.is_dense = False
     msg.data = np.asarray(points[:,:3], np.float32).tostring()
     pcl_pub.publish(msg)
+    
+    
+    
+'''
+names: run_3DMOT
+description: liadr 3D-MOT
+param {*} bboxes_3d
+param {*} scores_3d
+param {*} labels_3d
+return {*}
+'''
+def run_3DMOT(bboxes_3d, scores_3d, labels_3d):
+
+    bboxes_3d[:, 7] = scores_3d # 3DMOT需要使用box的score属性进行匹配关联，此处需要进行属性拼接
+    bboxes_3d[:, 8] = labels_3d # 拼接labels
+            
+    # 构造MOT输入
+    aux_info = {'is_key_frame': True}
+    millis = int(round(time.time() * 1000))
+    new_dets=list()
+    for idx, det in enumerate(bboxes_3d):
+        if det[8] < 2:
+            new_dets.append(det[:8])  
+    frame_data = FrameData(dets=new_dets, ego=None, time_stamp=millis, pc=None, det_types=None, aux_info=aux_info)
+    
+    # 跟踪算法入口
+    results = pc_tracker.frame_mot(frame_data)
+    
+    # print(results)
+    result_pred_bboxes = [trk[0] for trk in results]
+    result_pred_ids = [trk[1] for trk in results]
+    result_pred_states = [trk[2] for trk in results]
+    result_types = [trk[3] for trk in results]
+    
+    result_pred_bbox, markers = publish_boundingBox(result_pred_bboxes,'track', result_pred_ids, result_types)
+    pub_trace_boxes.publish(result_pred_bbox)
+    pub_trace_markers.publish(markers)
 
 '''
 names: 
@@ -217,12 +265,13 @@ param {*} args
 return {*}
 '''
 def main(args):
-    model = init_model(args.config, args.checkpoint, device=args.device)
-    model.to('cuda:0')
+    device = torch.device("cuda:0")
+    model = init_model(args.config, args.checkpoint, device=device)
+    # model.to(device)
 
     # 加载视觉模型
     YOLO_model = YOLO("checkpoints/YOLO/yolov8n.pt")
-    YOLO_model.to('cuda:0')
+    YOLO_model.to(device)
 
     # init visualizer
     if USING_ROS_RVIZ is not True:
@@ -263,35 +312,18 @@ def main(args):
             pred_instances_3d = result.pred_instances_3d
             pred_instances_3d = pred_instances_3d[
                             pred_instances_3d.scores_3d > args.score_thr].to('cpu')
-
-            bboxes_3d = pred_instances_3d.bboxes_3d.tensor.cpu().numpy()
+            
+            # 9D features = [x, y, z, l, w, h, yaw, roll, picth]
+            bboxes_3d = pred_instances_3d.bboxes_3d.tensor.cpu().numpy()  
             bboxes_3d[:, [3,4,5,6]] = bboxes_3d[:, [6,3,4,5]] 
             labels_3d = pred_instances_3d.labels_3d
             scores_3d = pred_instances_3d.scores_3d
             
             #执行MOT算法
-            if RUN_3DMOT:
-                # 构造MOT输入
-                aux_info = {'is_key_frame': True}
-                millis = int(round(time.time() * 1000))
-                new_dets=list()
-                for idx, det in enumerate(bboxes_3d):
-                    if labels_3d[idx] < 2:
-                        new_dets.append(det)
-                frame_data = FrameData(dets=new_dets, ego=None, time_stamp=millis, pc=points, det_types=None, aux_info=aux_info)
-                
-                # 跟踪算法入口
-                results = pc_tracker.frame_mot(frame_data)
-                
-                # print(results)
-                result_pred_bboxes = [trk[0] for trk in results]
-                result_pred_ids = [trk[1] for trk in results]
-                result_pred_states = [trk[2] for trk in results]
-                result_types = [trk[3] for trk in results]
-                
-                result_pred_bbox, markers = publish_boundingBox(result_pred_bboxes,'track', result_pred_ids, result_types)
-                pub_trace_boxes.publish(result_pred_bbox)
-                pub_trace_markers.publish(markers)
+            if RUN_3DMOT_FLAG:
+                run_3DMOT(pred_instances_3d.bboxes_3d.tensor.cpu().numpy() , 
+                          pred_instances_3d.scores_3d, 
+                          pred_instances_3d.labels_3d)
 
             # 视觉模型推理
             img_list = []
@@ -359,20 +391,16 @@ def main(args):
             
                 
              
-
-device = torch.device("cuda")
-
-USING_ROS_RVIZ = True
-
 radar_list = ['RADAR_FRONT', 'RADAR_FRONT_LEFT','RADAR_FRONT_RIGHT', 'RADAR_BACK_LEFT', 'RADAR_BACK_RIGHT']
 # img_pos_list = ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT']
 img_pos_list = ['CAM_FRONT_LEFT']
 
 # config
-RUN_3DMOT = True
+USING_ROS_RVIZ = True
+
+RUN_3DMOT_FLAG = False
 RUN_CAMERA_DET = False
 RADAR_VISIABLE = False
-
 
 header=Header()
 header.frame_id='nuscenes'

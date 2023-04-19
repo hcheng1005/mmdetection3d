@@ -7,7 +7,7 @@ from .update_info_data import UpdateInfoData
 from .data_protos import BBox, Validity
 from .association import associate_dets_to_tracks
 from . import visualization
-import redundancy
+from .redundancy import redundancy
 import pdb, os
 
 

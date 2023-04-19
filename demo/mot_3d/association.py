@@ -6,6 +6,17 @@ from .update_info_data import UpdateInfoData
 from .data_protos import BBox, Validity
 
 
+'''
+names: associate_dets_to_tracks
+description: 分配算法入口
+param {*} dets
+param {*} tracks
+param {*} mode: {bipartite、greedy}
+param {*} asso: {iou、giou、m_dis、euler}
+param {*} dist_threshold
+param {*} trk_innovation_matrix
+return {*}
+'''
 def associate_dets_to_tracks(dets, tracks, mode, asso, 
     dist_threshold=0.9, trk_innovation_matrix=None):
     """ associate the tracks with detections
@@ -36,6 +47,16 @@ def associate_dets_to_tracks(dets, tracks, mode, asso,
     return matches, np.array(unmatched_dets), np.array(unmatched_tracks)
 
 
+'''
+names: 
+description: Briefly describe the function of your function
+param {*} dets
+param {*} tracks
+param {*} asso: {iou、giou、m_dis、euler}
+param {*} dist_threshold
+param {*} trk_innovation_matrix
+return {*}
+'''
 def bipartite_matcher(dets, tracks, asso, dist_threshold, trk_innovation_matrix):
     if asso == 'iou':
         dist_matrix = compute_iou_distance(dets, tracks, asso)
