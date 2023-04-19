@@ -374,7 +374,7 @@ img_pos_list = ['CAM_FRONT_LEFT']
 USING_ROS_RVIZ = True
 
 RUN_3DMOT_FLAG = True
-RUN_CAMERA_DET = False
+RUN_CAMERA_DET = True
 RADAR_VISIABLE = False
 
 header=Header()

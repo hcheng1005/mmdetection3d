@@ -3,7 +3,7 @@ running:
   score_threshold: 0.01
   max_age_since_update: 2
   min_hits_to_birth: 1
-  match_type: bipartite
+  match_type: greedy
   asso: iou
   has_velo: false
   motion_model: kf
@@ -12,7 +12,7 @@ running:
     iou: 0.9
 
 redundancy:
-  mode: default
+  mode: mm
   det_score_threshold: 
     iou: 0.01
     giou: 0.01

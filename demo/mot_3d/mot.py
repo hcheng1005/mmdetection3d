@@ -11,6 +11,9 @@ from .redundancy import redundancy
 import pdb, os
 
 
+import time
+
+
 class MOTModel:
     def __init__(self, configs):
         self.trackers = list()         # tracker for each single tracklet
@@ -55,23 +58,25 @@ class MOTModel:
         Returns:
             tracks on this frame: [(bbox0, id0), (bbox1, id1), ...]
         """
+        time_list = []
+        
+        print('track num: ', len(self.trackers), 'det num: ', len(input_data.dets))
+        
+        time_list.append(time.time_ns() / 1e6)
+        
         self.frame_count += 1
 
         # initialize the time stamp on frame 0
         if self.time_stamp is None:
             self.time_stamp = input_data.time_stamp
-
-        # if not input_data.aux_info['is_key_frame']:
-        #     result = self.non_key_frame_mot(input_data)
-        #     return result
-    
+                
         # 卡尔曼预测
-        # 1.1 航迹状态预测
-        # 1.2 trk-det匹配
-        # if 'kf' in self.motion_model:
         matched, unmatched_dets, unmatched_trks = self.forward_step_trk(input_data)
         
-        time_lag = input_data.time_stamp - self.time_stamp
+        time_list.append(time.time_ns() / 1e6)
+        
+        # time_lag = input_data.time_stamp - self.time_stamp
+        time_lag = 0.1 # 假设diff-time为0.1s
         # update the matched tracks
         # 航迹更新
         for t, trk in enumerate(self.trackers):
@@ -80,12 +85,6 @@ class MOTModel:
                     if matched[k][1] == t:
                         d = matched[k][0]
                         break
-                # if self.has_velo:
-                #     aux_info = {
-                #         'velo': list(input_data.aux_info['velos'][d]), 
-                #         'is_key_frame': input_data.aux_info['is_key_frame']}
-                # else:
-                #     aux_info = {'is_key_frame': input_data.aux_info['is_key_frame']}
 
                 aux_info = {'is_key_frame': input_data.aux_info['is_key_frame']}
                 update_info = UpdateInfoData(mode=1, bbox=input_data.dets[d], ego=input_data.ego, 
@@ -103,22 +102,19 @@ class MOTModel:
 
             # 航迹更新    
             trk.update(update_info)
+            
+        time_list.append(time.time_ns() / 1e6)
         
         # create new tracks for unmatched detections
         # 未关联的dets起始新航迹
         for index in unmatched_dets:
-            # if self.has_velo:
-            #     aux_info = {
-            #         'velo': list(input_data.aux_info['velos'][index]), 
-            #         'is_key_frame': input_data.aux_info['is_key_frame']}
-            # else:
-            #     aux_info = {'is_key_frame': input_data.aux_info['is_key_frame']}
-
             aux_info = {'is_key_frame': input_data.aux_info['is_key_frame']}
             track = tracklet.Tracklet(self.configs, self.count, input_data.dets[index], 1, 
                 self.frame_count, aux_info=aux_info, time_stamp=input_data.time_stamp)
             self.trackers.append(track)
             self.count += 1
+            
+        time_list.append(time.time_ns() / 1e6)
         
         # remove dead tracks
         # 航迹管理
@@ -126,7 +122,7 @@ class MOTModel:
         for index, trk in enumerate(reversed(self.trackers)):
             if trk.death(self.frame_count):
                 self.trackers.pop(track_num - 1 - index)
-        
+        time_list.append(time.time_ns() / 1e6)
         # output the results
         # 结果输出
         result = list()
@@ -138,14 +134,21 @@ class MOTModel:
         self.time_stamp = input_data.time_stamp
         for trk in self.trackers:
             trk.sync_time_stamp(self.time_stamp)
-
+            
+        time_list.append(time.time_ns() / 1e6)
+        
+        print(time_list)
+        
         return result
     
     def forward_step_trk(self, input_data: FrameData):
         dets = input_data.dets
         det_indexes = [i for i, det in enumerate(dets) if det.s >= self.score_threshold]
         dets = [dets[i] for i in det_indexes]
-
+        
+        time_list = []     
+        time_list.append(time.time_ns() / 1e6)
+        
         # prediction and association
         trk_preds = list()
         for trk in self.trackers:
@@ -153,6 +156,8 @@ class MOTModel:
         
         # for m-distance association
         trk_innovation_matrix = None
+        
+        time_list.append(time.time_ns() / 1e6)
 
         # 若采用“m_dis”的关联算法，则提前计算“匹配分矩阵”
         if self.asso == 'm_dis':
@@ -162,86 +167,14 @@ class MOTModel:
         matched, unmatched_dets, unmatched_trks = associate_dets_to_tracks(dets, trk_preds, 
             self.match_type, self.asso, self.asso_thres, trk_innovation_matrix)
         
-        for k in range(len(matched)):
-            matched[k][0] = det_indexes[matched[k][0]]
-        for k in range(len(unmatched_dets)):
-            unmatched_dets[k] = det_indexes[unmatched_dets[k]]
-        return matched, unmatched_dets, unmatched_trks
-    
-    '''
-    def non_key_forward_step_trk(self, input_data: FrameData):
-        """ tracking on non-key frames (for nuScenes)
-        """
-        dets = input_data.dets
-        det_indexes = [i for i, det in enumerate(dets) if det.s >= 0.5]
-        dets = [dets[i] for i in det_indexes]
-
-        # prediction and association
-        trk_preds = list()
-        for trk in self.trackers:
-            trk_preds.append(trk.predict(input_data.time_stamp, input_data.aux_info['is_key_frame']))
-        
-        # for m-distance association
-        trk_innovation_matrix = None
-        if self.asso == 'm_dis':
-            trk_innovation_matrix = [trk.compute_innovation_matrix() for trk in self.trackers] 
-
-        matched, unmatched_dets, unmatched_trks = associate_dets_to_tracks(dets, trk_preds, 
-            self.match_type, self.asso, self.asso_thres, trk_innovation_matrix)
+        time_list.append(time.time_ns() / 1e6)
         
         for k in range(len(matched)):
             matched[k][0] = det_indexes[matched[k][0]]
         for k in range(len(unmatched_dets)):
             unmatched_dets[k] = det_indexes[unmatched_dets[k]]
+            
+        time_list.append(time.time_ns() / 1e6)
+        print(time_list)    
         return matched, unmatched_dets, unmatched_trks
     
-    def non_key_frame_mot(self, input_data: FrameData):
-        """ tracking on non-key frames (for nuScenes)
-        """
-        self.frame_count += 1
-        # initialize the time stamp on frame 0
-        if self.time_stamp is None:
-            self.time_stamp = input_data.time_stamp
-        
-        if 'kf' in self.motion_model:
-            matched, unmatched_dets, unmatched_trks = self.non_key_forward_step_trk(input_data)
-        time_lag = input_data.time_stamp - self.time_stamp
-
-        redundancy_bboxes, update_modes = self.non_key_redundancy.bipartite_infer(input_data, self.trackers)
-        # update the matched tracks
-        for t, trk in enumerate(self.trackers):
-            if t not in unmatched_trks:
-                for k in range(len(matched)):
-                    if matched[k][1] == t:
-                        d = matched[k][0]
-                        break
-                if self.has_velo:
-                    aux_info = {
-                        'velo': list(input_data.aux_info['velos'][d]), 
-                        'is_key_frame': input_data.aux_info['is_key_frame']}
-                else:
-                    aux_info = {'is_key_frame': input_data.aux_info['is_key_frame']}
-                update_info = UpdateInfoData(mode=1, bbox=input_data.dets[d], ego=input_data.ego, 
-                    frame_index=self.frame_count, pc=input_data.pc, 
-                    dets=input_data.dets, aux_info=aux_info)
-                trk.update(update_info)
-            else:
-                aux_info = {'is_key_frame': input_data.aux_info['is_key_frame']}
-                update_info = UpdateInfoData(mode=update_modes[t], bbox=redundancy_bboxes[t], 
-                    ego=input_data.ego, frame_index=self.frame_count, 
-                    pc=input_data.pc, dets=input_data.dets, aux_info=aux_info)
-                trk.update(update_info)
-        
-        # output the results
-        result = list()
-        for trk in self.trackers:
-            state_string = trk.state_string(self.frame_count)
-            result.append((trk.get_state(), trk.id, state_string, trk.det_type))
-
-        # wrap up and update the information about the mot trackers
-        self.time_stamp = input_data.time_stamp
-        for trk in self.trackers:
-            trk.sync_time_stamp(self.time_stamp)
-
-        return result
-    '''
